@@ -71,7 +71,7 @@ from .models import Alert, CoordinatorData, Departure, WatchConfig
 from .rate_limiter import AsyncRateLimiter
 from .realtime.client import PTVRealtimeClient
 from .realtime.service_alerts import parse_alerts
-from .realtime.trip_updates import parse_trip_updates
+from .realtime.trip_updates import effective_delay, parse_trip_updates
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -291,6 +291,14 @@ class PTVDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):  # type:
         # Compute service_type labels for these trips
         service_types = await self._classify_service_types(departure_rows)
 
+        matched = sum(
+            1 for r in departure_rows if f"{r.trip_id}:{r.actual_stop_id}" in trip_delays
+        )
+        _LOGGER.debug(
+            "Realtime matched %d of %d departures (%d trip updates in feed)",
+            matched, len(departure_rows), len(trip_delays),
+        )
+
         departures: list[Departure] = []
         for row in departure_rows:
             key = f"{row.trip_id}:{row.actual_stop_id}"
@@ -304,7 +312,7 @@ class PTVDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):  # type:
                     headsign=row.trip_headsign,
                     direction_id=row.direction_id,
                     scheduled_departure=row.scheduled_departure,
-                    delay_seconds=stop_delay.delay_seconds if stop_delay else 0,
+                    delay_seconds=effective_delay(stop_delay, row.scheduled_departure),
                     is_cancelled=stop_delay.is_cancelled if stop_delay else False,
                     platform=row.platform_code,
                     route_color=row.route_color,
@@ -360,7 +368,7 @@ class PTVDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):  # type:
             # Apply realtime delay to arrival
             key1 = f"{leg1.trip_id}:{leg1.actual_stop_id}"
             delay1 = trip_delays.get(key1)
-            delay1_secs = delay1.delay_seconds if delay1 else 0
+            delay1_secs = effective_delay(delay1, leg1.scheduled_departure)
             from datetime import timedelta as td
             adjusted_arrival = arrival_at_transfer + td(seconds=delay1_secs)
             # Earliest moment we can board leg 2
@@ -387,7 +395,7 @@ class PTVDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):  # type:
             leg2 = leg2_rows[0]
             key2 = f"{leg2.trip_id}:{leg2.actual_stop_id}"
             delay2 = trip_delays.get(key2)
-            delay2_secs = delay2.delay_seconds if delay2 else 0
+            delay2_secs = effective_delay(delay2, leg2.scheduled_departure)
             leg2_actual = leg2.scheduled_departure + td(seconds=delay2_secs)
 
             # Total journey time = leg2 arrival at dest (approx) - leg1 departure

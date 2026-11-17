@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
+
+from homeassistant.util import dt as dt_util
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,6 +26,21 @@ class StopDelay:
 
     delay_seconds: int
     is_cancelled: bool
+    # Absolute predicted POSIX time. Metro Trains' feed sends only this, with
+    # no ``delay`` field, so the delay must be derived from the schedule.
+    event_time: int | None = None
+    has_delay: bool = False
+
+
+def effective_delay(stop_delay: StopDelay | None, scheduled: datetime) -> int:
+    """Return the delay in seconds, deriving it from ``event_time`` if needed."""
+    if stop_delay is None:
+        return 0
+    if stop_delay.has_delay or not stop_delay.event_time:
+        return stop_delay.delay_seconds
+    if scheduled.tzinfo is None:
+        scheduled = scheduled.replace(tzinfo=dt_util.get_default_time_zone())
+    return int(stop_delay.event_time - scheduled.timestamp())
 
 
 def parse_trip_updates(feed: object) -> dict[str, StopDelay]:
@@ -69,13 +87,26 @@ def parse_trip_updates(feed: object) -> dict[str, StopDelay]:
                 continue
 
             delay = 0
+            has_delay = False
+            event_time: int | None = None
             if stu.HasField("departure") and stu.departure.HasField("delay"):
                 delay = stu.departure.delay
+                has_delay = True
             elif stu.HasField("arrival") and stu.arrival.HasField("delay"):
                 delay = stu.arrival.delay
+                has_delay = True
+            if stu.HasField("departure") and stu.departure.time:
+                event_time = stu.departure.time
+            elif stu.HasField("arrival") and stu.arrival.time:
+                event_time = stu.arrival.time
 
             key = f"{trip_id}:{stop_id}"
-            result[key] = StopDelay(delay_seconds=delay, is_cancelled=is_cancelled)
+            result[key] = StopDelay(
+                delay_seconds=delay,
+                is_cancelled=is_cancelled,
+                event_time=event_time,
+                has_delay=has_delay,
+            )
 
     _LOGGER.debug("Parsed %d stop-level trip updates", len(result))
     return result
