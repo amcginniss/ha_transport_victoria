@@ -9,6 +9,7 @@ without touching protobuf objects outside this module.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -18,6 +19,17 @@ _LOGGER = logging.getLogger(__name__)
 
 # ScheduleRelationship enum values from the GTFS Realtime spec
 _SR_CANCELED = 3
+
+# PTV trip IDs look like "02-CGB--75-T5-5878": mode-route--<build>-<pattern>-<trip>.
+# The build number differs between the static timetable and the realtime feed
+# (e.g. "1" vs "75") for the same train, so it is dropped before matching.
+_TRIP_BUILD_RE = re.compile(r"^([^-]+-[^-]+)--[^-]+-(.+)$")
+
+
+def normalize_trip_id(trip_id: str) -> str:
+    """Return the trip_id without its build segment, for matching."""
+    match = _TRIP_BUILD_RE.match(trip_id)
+    return f"{match.group(1)}--{match.group(2)}" if match else trip_id
 
 
 @dataclass(slots=True, frozen=True)
@@ -39,6 +51,7 @@ def lookup_stop_delay(
     stop_sequence: int | None,
 ) -> StopDelay | None:
     """Find the realtime entry for a trip at a stop, by stop_id then stop_sequence."""
+    trip_id = normalize_trip_id(trip_id)
     found = trip_delays.get(f"{trip_id}:{stop_id}")
     if found is None and stop_sequence is not None:
         found = trip_delays.get(f"{trip_id}#{stop_sequence}")
@@ -89,6 +102,7 @@ def parse_trip_updates(feed: object) -> dict[str, StopDelay]:
 
         if not trip_id:
             continue
+        trip_id = normalize_trip_id(trip_id)
 
         is_cancelled = (
             trip_update.trip.schedule_relationship == _SR_CANCELED

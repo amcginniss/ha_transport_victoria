@@ -71,7 +71,12 @@ from .models import Alert, CoordinatorData, Departure, WatchConfig
 from .rate_limiter import AsyncRateLimiter
 from .realtime.client import PTVRealtimeClient
 from .realtime.service_alerts import parse_alerts
-from .realtime.trip_updates import effective_delay, lookup_stop_delay, parse_trip_updates
+from .realtime.trip_updates import (
+    effective_delay,
+    lookup_stop_delay,
+    normalize_trip_id,
+    parse_trip_updates,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -303,7 +308,7 @@ class PTVDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):  # type:
         if departure_rows and trip_delays and not matched:
             row = departure_rows[0]
             route_code = row.trip_id.split("-")[1] if "-" in row.trip_id else row.trip_id
-            same_trip = [k for k in trip_delays if k.startswith(row.trip_id)][:5]
+            same_trip = [k for k in trip_delays if k.startswith(normalize_trip_id(row.trip_id))][:5]
             same_route = [k for k in trip_delays if route_code in k][:5]
             _LOGGER.debug(
                 "Realtime no-match diagnostics: static key %s:%s seq %s; "
