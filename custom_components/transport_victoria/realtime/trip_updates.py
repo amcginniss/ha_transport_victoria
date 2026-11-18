@@ -32,6 +32,19 @@ class StopDelay:
     has_delay: bool = False
 
 
+def lookup_stop_delay(
+    trip_delays: dict[str, StopDelay],
+    trip_id: str,
+    stop_id: str,
+    stop_sequence: int | None,
+) -> StopDelay | None:
+    """Find the realtime entry for a trip at a stop, by stop_id then stop_sequence."""
+    found = trip_delays.get(f"{trip_id}:{stop_id}")
+    if found is None and stop_sequence is not None:
+        found = trip_delays.get(f"{trip_id}#{stop_sequence}")
+    return found
+
+
 def effective_delay(stop_delay: StopDelay | None, scheduled: datetime) -> int:
     """Return the delay in seconds, deriving it from ``event_time`` if needed."""
     if stop_delay is None:
@@ -101,12 +114,17 @@ def parse_trip_updates(feed: object) -> dict[str, StopDelay]:
                 event_time = stu.arrival.time
 
             key = f"{trip_id}:{stop_id}"
-            result[key] = StopDelay(
+            stop_delay = StopDelay(
                 delay_seconds=delay,
                 is_cancelled=is_cancelled,
                 event_time=event_time,
                 has_delay=has_delay,
             )
+            result[key] = stop_delay
+            # Secondary key so a platform stop_id mismatch can still match
+            # on the trip's stop sequence.
+            if stu.stop_sequence:
+                result.setdefault(f"{trip_id}#{stu.stop_sequence}", stop_delay)
 
     _LOGGER.debug("Parsed %d stop-level trip updates", len(result))
     return result

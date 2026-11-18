@@ -71,7 +71,7 @@ from .models import Alert, CoordinatorData, Departure, WatchConfig
 from .rate_limiter import AsyncRateLimiter
 from .realtime.client import PTVRealtimeClient
 from .realtime.service_alerts import parse_alerts
-from .realtime.trip_updates import effective_delay, parse_trip_updates
+from .realtime.trip_updates import effective_delay, lookup_stop_delay, parse_trip_updates
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -292,17 +292,31 @@ class PTVDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):  # type:
         service_types = await self._classify_service_types(departure_rows)
 
         matched = sum(
-            1 for r in departure_rows if f"{r.trip_id}:{r.actual_stop_id}" in trip_delays
+            1
+            for r in departure_rows
+            if lookup_stop_delay(trip_delays, r.trip_id, r.actual_stop_id, r.stop_sequence)
         )
         _LOGGER.debug(
             "Realtime matched %d of %d departures (%d trip updates in feed)",
             matched, len(departure_rows), len(trip_delays),
         )
+        if departure_rows and trip_delays and not matched:
+            row = departure_rows[0]
+            route_code = row.trip_id.split("-")[1] if "-" in row.trip_id else row.trip_id
+            same_trip = [k for k in trip_delays if k.startswith(row.trip_id)][:5]
+            same_route = [k for k in trip_delays if route_code in k][:5]
+            _LOGGER.debug(
+                "Realtime no-match diagnostics: static key %s:%s seq %s; "
+                "feed keys for same trip %s; feed keys for route %s; sample feed keys %s",
+                row.trip_id, row.actual_stop_id, row.stop_sequence,
+                same_trip, same_route, list(trip_delays)[:5],
+            )
 
         departures: list[Departure] = []
         for row in departure_rows:
-            key = f"{row.trip_id}:{row.actual_stop_id}"
-            stop_delay = trip_delays.get(key)
+            stop_delay = lookup_stop_delay(
+                trip_delays, row.trip_id, row.actual_stop_id, row.stop_sequence
+            )
             departures.append(
                 Departure(
                     trip_id=row.trip_id,
@@ -366,8 +380,9 @@ class PTVDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):  # type:
                 continue
 
             # Apply realtime delay to arrival
-            key1 = f"{leg1.trip_id}:{leg1.actual_stop_id}"
-            delay1 = trip_delays.get(key1)
+            delay1 = lookup_stop_delay(
+                trip_delays, leg1.trip_id, leg1.actual_stop_id, leg1.stop_sequence
+            )
             delay1_secs = effective_delay(delay1, leg1.scheduled_departure)
             from datetime import timedelta as td
             adjusted_arrival = arrival_at_transfer + td(seconds=delay1_secs)
@@ -393,8 +408,9 @@ class PTVDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):  # type:
                 continue
 
             leg2 = leg2_rows[0]
-            key2 = f"{leg2.trip_id}:{leg2.actual_stop_id}"
-            delay2 = trip_delays.get(key2)
+            delay2 = lookup_stop_delay(
+                trip_delays, leg2.trip_id, leg2.actual_stop_id, leg2.stop_sequence
+            )
             delay2_secs = effective_delay(delay2, leg2.scheduled_departure)
             leg2_actual = leg2.scheduled_departure + td(seconds=delay2_secs)
 
