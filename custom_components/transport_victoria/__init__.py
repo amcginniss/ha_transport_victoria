@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from homeassistant.components.http import StaticPathConfig
@@ -12,6 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_DEPARTURE_COUNT,
@@ -22,15 +23,17 @@ from .const import (
     DOMAIN,
     ENTRY_TYPE_ROUTE_TRACKER,
     ENTRY_TYPE_VEHICLE_TRACKER,
+    GTFS_SCHEDULE_DATASET_API,
     GTFS_SCHEDULE_URL,
     MODE_BUNDLE_MAP,
     PICTOGRAM_URL_BASE,
 )
 from .coordinator import PTVDataUpdateCoordinator
 from .device_tracker import RouteVehicleCoordinator, VehicleTrackerCoordinator
-from .gtfs.downloader import check_for_remote_changes, download_zip
+from .gtfs.downloader import check_for_remote_changes, download_zip, resolve_schedule_url
 from .gtfs.importer import get_imported_bundles, get_stored_zip_meta, import_mode_bundles
 from .gtfs.repository import is_mode_ready
+from .services import async_register_services
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -110,10 +113,12 @@ async def async_trigger_gtfs_refresh(
     already_imported = await hass.async_add_executor_job(get_imported_bundles, db_path)
     all_bundles_present = all(b in already_imported for b in bundle_folders)
 
+    schedule_url = await resolve_schedule_url(hass, GTFS_SCHEDULE_URL, GTFS_SCHEDULE_DATASET_API)
+
     if not skip_download_if_exists:
         # HEAD check: if ETag + size match and all bundles are imported, skip everything
         remote_changed = await check_for_remote_changes(
-            hass, GTFS_SCHEDULE_URL, stored_etag, stored_size
+            hass, schedule_url, stored_etag, stored_size
         )
         if not remote_changed and all_bundles_present:
             _LOGGER.debug("GTFS schedule unchanged (HEAD check) — skipping download and import")
@@ -124,7 +129,7 @@ async def async_trigger_gtfs_refresh(
     try:
         changed, sha256, etag, content_length = await download_zip(
             hass,
-            GTFS_SCHEDULE_URL,
+            schedule_url,
             zip_path,
             skip_if_exists=skip_download_if_exists,
         )
@@ -168,6 +173,26 @@ async def async_trigger_gtfs_refresh(
         await hass.async_add_executor_job(_run_import)
     except Exception as exc:
         _LOGGER.error("Failed to import GTFS bundles %s: %s", bundle_folders, exc)
+
+
+def _imported_at(db_path: Path) -> datetime | None:
+    """Return when the timetable was last imported, or None if unknown."""
+    if not db_path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute(
+                "SELECT value FROM import_meta WHERE key = 'imported_at'"
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+    if not row:
+        return None
+    parsed = dt_util.parse_datetime(row[0])
+    return dt_util.as_utc(parsed) if parsed else None
 
 
 def _update_zip_meta(db_path: Path, etag: str | None, size: str | None) -> None:
@@ -240,6 +265,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # type: ignor
             cache_headers=True,
         ),
     ])
+    async_register_services(hass, _db_path(hass))
     return True
 
 
@@ -293,6 +319,15 @@ async def _async_setup_watch(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     bundles = MODE_BUNDLE_MAP.get(mode, [])
     if bundles and not is_mode_ready(_db_path(hass), bundles):
         hass.async_create_task(async_trigger_gtfs_refresh(hass, bundles))
+    elif bundles and not hass.data[DOMAIN].get("startup_refresh_checked"):
+        # The weekly timer restarts with Home Assistant, so a timetable can go
+        # stale if HA restarts more often than weekly. Refresh once at startup
+        # when the last import is older than the refresh interval.
+        hass.data[DOMAIN]["startup_refresh_checked"] = True
+        imported_at = await hass.async_add_executor_job(_imported_at, _db_path(hass))
+        if imported_at is None or dt_util.utcnow() - imported_at > _GTFS_REFRESH_INTERVAL:
+            _LOGGER.info("GTFS timetable last imported %s; refreshing", imported_at)
+            hass.async_create_task(async_trigger_gtfs_refresh(hass))
 
     # Schedule weekly refreshes
     cancel_refresh = async_track_time_interval(

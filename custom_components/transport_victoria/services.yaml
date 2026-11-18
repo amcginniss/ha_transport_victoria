@@ -1,0 +1,31 @@
+plan_trip:
+  fields:
+    from:
+      required: false
+      example: "Pascoe Vale"
+      selector:
+        text:
+    to:
+      required: true
+      example: "Richmond"
+      selector:
+        text:
+    depart_after:
+      required: false
+      selector:
+        datetime:
+    min_transfer_minutes:
+      required: false
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 30
+          unit_of_measurement: min
+    results:
+      required: false
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 10

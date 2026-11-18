@@ -12,6 +12,14 @@ GTFS_SCHEDULE_URL = (
     "fb152201-859f-4882-9206-b768060b50ad/download/gtfs.zip"
 )
 
+# The portal moves the ZIP to a new resource URL on each publish, so the current
+# URL is looked up from the dataset's CKAN metadata; GTFS_SCHEDULE_URL is the
+# fallback if that lookup fails.
+GTFS_SCHEDULE_DATASET_API = (
+    "https://opendata.transport.vic.gov.au/api/3/action/package_show"
+    "?id=3f4e292e-7f8a-4ffe-831f-1953be0fe448"
+)
+
 REALTIME_BASE_URL = (
     "https://api.opendata.transport.vic.gov.au"
     "/opendata/public-transport/gtfs/realtime/v1"

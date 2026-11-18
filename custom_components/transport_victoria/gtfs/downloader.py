@@ -27,6 +27,34 @@ _LOGGER = logging.getLogger(__name__)
 _CHUNK_SIZE = 1024 * 1024  # 1 MB
 
 
+async def resolve_schedule_url(hass: HomeAssistant, fallback: str, api_url: str) -> str:
+    """Return the current GTFS Schedule ZIP URL from the portal's dataset metadata.
+
+    The portal publishes each new timetable under a new resource id, so a
+    hard-coded download URL eventually returns 404. Falls back to ``fallback``.
+    """
+    session = async_get_clientsession(hass)
+    try:
+        async with session.get(api_url, timeout=30) as resp:
+            resp.raise_for_status()
+            payload = await resp.json(content_type=None)
+        resources = payload.get("result", {}).get("resources", [])
+        zips = [
+            r for r in resources
+            if str(r.get("url", "")).lower().endswith(".zip")
+        ]
+        zips.sort(key=lambda r: str(r.get("last_modified") or r.get("created") or ""), reverse=True)
+        if zips:
+            url = str(zips[0]["url"])
+            if url != fallback:
+                _LOGGER.debug("Resolved GTFS schedule URL: %s", url)
+            return url
+        _LOGGER.warning("GTFS dataset metadata has no ZIP resource; using default URL")
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.warning("Could not look up current GTFS schedule URL (%s); using default", exc)
+    return fallback
+
+
 async def check_for_remote_changes(
     hass: HomeAssistant,
     url: str,

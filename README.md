@@ -82,6 +82,23 @@ Exact entity ids follow Home Assistant’s naming; see **Developer tools → Sta
 
 ---
 
+## Trip planner action
+
+`transport_victoria.plan_trip` finds the best train trip between two stations, either direct or with one change. That includes short walks between nearby stations, such as Melbourne Central to State Library or Flinders Street to Town Hall. It uses live delays and cancellations for trips leaving in the next two hours.
+
+```yaml
+action: transport_victoria.plan_trip
+data:
+  to: Richmond            # station name
+  from: Pascoe Vale       # optional; defaults to your first watch's station
+  depart_after: "08:00"   # optional; defaults to now
+  min_transfer_minutes: 3 # optional
+  results: 3              # optional
+response_variable: trip
+```
+
+The response has `best`, `options` (best first) and a one-line `message`. Each option includes `summary` (for example "Change at North Melbourne Station"), `change_at`, `walk_to`, `depart`, `arrive`, `duration_minutes` and `legs` (route, platform, times and delay). It only covers modes you have a watch for, so trains only if you only watch trains.
+
 ## Data sources
 
 All datasets are published by Transport Victoria on the **[open data portal](https://opendata.transport.vic.gov.au/)**.

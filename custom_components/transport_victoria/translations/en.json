@@ -151,5 +151,33 @@
         }
       }
     }
+  },
+  "services": {
+    "plan_trip": {
+      "name": "Plan trip",
+      "description": "Find the best train trip between two stations, direct or with one change, using live delays when available. Returns the options, best first.",
+      "fields": {
+        "from": {
+          "name": "From",
+          "description": "Starting station name, for example Pascoe Vale. Defaults to the station of your first departure watch."
+        },
+        "to": {
+          "name": "To",
+          "description": "Destination station name, for example Richmond."
+        },
+        "depart_after": {
+          "name": "Depart after",
+          "description": "Earliest departure. Defaults to now."
+        },
+        "min_transfer_minutes": {
+          "name": "Minimum change time",
+          "description": "Minutes needed to change trains at the same station."
+        },
+        "results": {
+          "name": "Results",
+          "description": "How many options to return."
+        }
+      }
+    }
   }
 }

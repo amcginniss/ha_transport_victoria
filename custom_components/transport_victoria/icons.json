@@ -33,5 +33,10 @@
         "default": "mdi:train"
       }
     }
+  },
+  "services": {
+    "plan_trip": {
+      "service": "mdi:map-marker-path"
+    }
   }
 }

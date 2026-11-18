@@ -144,6 +144,13 @@ class PTVDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):  # type:
         session = async_get_clientsession(self.hass)
         self._client = PTVRealtimeClient(self._watch_config.api_key, session)
 
+    @property
+    def realtime_client(self) -> PTVRealtimeClient | None:
+        """Realtime client, shared with the trip planner action."""
+        if not self._watch_config.realtime_enabled:
+            return None
+        return self._client
+
     # ------------------------------------------------------------------
     # Options update
     # ------------------------------------------------------------------
